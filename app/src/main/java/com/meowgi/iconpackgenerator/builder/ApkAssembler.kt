@@ -12,6 +12,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.security.MessageDigest
 import java.util.zip.Adler32
+import java.util.zip.ZipEntry
 
 class ApkAssembler {
 
@@ -33,6 +34,8 @@ class ApkAssembler {
         icons: List<IconEntry>,
         appFilterXml: String,
         drawableXml: String,
+        packIconPng: ByteArray?,
+        viewerDex: ByteArray?,
         outputFile: File
     ) {
         val apkModule = ApkModule()
@@ -50,7 +53,18 @@ class ApkAssembler {
         val pkg = tableBlock.newPackage(0x7f, config.packageName)
 
         addDrawableResources(apkModule, pkg, icons)
-        configureManifest(manifest, config, framework)
+
+        // Add pack icon as a drawable resource
+        var iconResId = 0
+        if (packIconPng != null) {
+            val iconPath = "res/drawable-nodpi-v4/ic_pack_icon.png"
+            val iconEntry = pkg.getOrCreate("nodpi-v4", "drawable", "ic_pack_icon")
+            iconEntry.setValueAsString(iconPath)
+            apkModule.add(ByteInputSource(packIconPng, iconPath))
+            iconResId = iconEntry.resourceId
+        }
+
+        configureManifest(manifest, config, framework, iconResId, viewerDex != null)
 
         // appfilter.xml in assets/ (plain text, widest launcher compatibility)
         apkModule.add(
@@ -68,8 +82,11 @@ class ApkAssembler {
             )
         )
 
-        // Minimal valid DEX (required by Android package manager)
-        apkModule.add(ByteInputSource(buildMinimalDex(), "classes.dex"))
+        // Use viewer DEX (real Activity) if available, otherwise minimal DEX
+        val dexBytes = viewerDex ?: buildMinimalDex()
+        val dexSource = ByteInputSource(dexBytes, "classes.dex")
+        dexSource.setMethod(ZipEntry.STORED)
+        apkModule.add(dexSource)
 
         apkModule.writeApk(outputFile)
     }
@@ -92,7 +109,9 @@ class ApkAssembler {
     private fun configureManifest(
         manifest: AndroidManifestBlock,
         config: AssemblyConfig,
-        framework: com.reandroid.apk.FrameworkApk?
+        framework: com.reandroid.apk.FrameworkApk?,
+        iconResId: Int,
+        hasViewerDex: Boolean
     ) {
         manifest.packageName = config.packageName
         manifest.setVersionCode(config.versionCode)
@@ -109,8 +128,16 @@ class ApkAssembler {
 
         manifest.setApplicationLabel(config.packLabel)
 
-        // Create main activity (shows in app drawer + launcher recognizes as icon pack)
-        val activity = manifest.getOrCreateMainActivity("android.app.Activity")
+        if (iconResId != 0) {
+            manifest.setIconResourceId(iconResId)
+        }
+
+        val activityClass = if (hasViewerDex) {
+            "com.meowgi.ipg.viewer.PackViewerActivity"
+        } else {
+            "android.app.Activity"
+        }
+        val activity = manifest.getOrCreateMainActivity(activityClass)
         activity.getOrCreateAndroidAttribute(
             "label", AndroidManifestBlock.ID_label
         ).setValueAsString(config.packLabel)

@@ -29,6 +29,7 @@ class IconPackBuilder(private val context: Context) {
     companion object {
         private const val MIN_FREE_BYTES = 50L * 1024 * 1024
         private const val BATCH_SIZE = 50
+        private const val DRY_RUN_MAX_ICONS = 24
     }
 
     fun build(
@@ -70,6 +71,13 @@ class IconPackBuilder(private val context: Context) {
                 )
             }
 
+            val appsToProcess = if (config.dryRun && apps.size > DRY_RUN_MAX_ICONS) {
+                logs.add("Dry run: sampling $DRY_RUN_MAX_ICONS of ${apps.size} apps")
+                apps.shuffled().take(DRY_RUN_MAX_ICONS).sortedBy { it.label.lowercase() }
+            } else {
+                apps
+            }
+
             val workDir = File(context.cacheDir, "ipg_work").apply {
                 deleteRecursively()
                 mkdirs()
@@ -80,10 +88,10 @@ class IconPackBuilder(private val context: Context) {
             val mappings = mutableListOf<Pair<AppInfo, String>>()
             var failedCount = 0
 
-            val rawNames = apps.map { ResourceNameSanitizer.sanitize(it.packageName, it.activityName) }
+            val rawNames = appsToProcess.map { ResourceNameSanitizer.sanitize(it.packageName, it.activityName) }
             val resourceNames = ResourceNameSanitizer.deduplicateNames(rawNames)
 
-            for ((index, app) in apps.withIndex()) {
+            for ((index, app) in appsToProcess.withIndex()) {
                 if (isCancelled()) {
                     logs.add("Cancelled by user")
                     return GenerationResult(success = false, errorMessage = "Cancelled", logs = logs)
@@ -95,7 +103,7 @@ class IconPackBuilder(private val context: Context) {
                     GenerationProgress(
                         Phase.EXTRACTING,
                         current = index + 1,
-                        total = apps.size,
+                        total = appsToProcess.size,
                         message = "Processing: ${app.label}"
                     )
                 )
@@ -164,8 +172,17 @@ class IconPackBuilder(private val context: Context) {
                 versionName = "1.0.$versionCode"
             )
 
+            // Load pack icon and viewer DEX from assets
+            val packIconPng = try {
+                context.assets.open("pack_icon.png").use { it.readBytes() }
+            } catch (_: Exception) { null }
+
+            val viewerDex = try {
+                context.assets.open("viewer_classes.dex").use { it.readBytes() }
+            } catch (_: Exception) { null }
+
             val unsignedApk = File(workDir, "unsigned.apk")
-            assembler.assemble(assemblyConfig, iconEntries, appFilterXml, drawableXml, unsignedApk)
+            assembler.assemble(assemblyConfig, iconEntries, appFilterXml, drawableXml, packIconPng, viewerDex, unsignedApk)
             logs.add("APK assembled: ${unsignedApk.length() / 1024}KB")
 
             onProgress(GenerationProgress(Phase.SIGNING, message = "Signing APK..."))

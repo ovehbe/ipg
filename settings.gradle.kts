@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "IconPackGenerator"
 include(":app")
+include(":packviewer")

@@ -11,9 +11,9 @@ import android.graphics.Rect
  *
  * Pipeline:
  * 1. All non-transparent pixels form the foreground (bg already removed by U2-Net)
- * 2. Foreground pixels are split into two groups by luminance (k=2)
- *    - The "structure" group (darker/dominant) → full opacity target color
- *    - The "fill" group (lighter/secondary) → reduced opacity for subtle detail
+ * 2. Otsu's method splits foreground into two luminance groups
+ *    - Primary (larger group) → full opacity target color
+ *    - Secondary (smaller group) → reduced opacity for subtle detail
  * 3. Result: clean two-tone silhouette with visible internal structure
  */
 class MonochromeConverter {
@@ -24,9 +24,7 @@ class MonochromeConverter {
         private const val ALPHA_THRESHOLD = 25
 
         // Opacity for the secondary (lighter) foreground region.
-        // 0 = fully carved out, 255 = same as primary (no detail).
-        // ~100 gives a visible but subtle two-tone effect.
-        private const val SECONDARY_ALPHA = 100
+        private const val SECONDARY_ALPHA = 80
 
         // If the two luminance groups are closer than this, skip the split
         // and render everything at full opacity (icon is essentially one color).
@@ -70,7 +68,6 @@ class MonochromeConverter {
     private fun buildAlphaMap(pixels: IntArray): IntArray {
         val alphaMap = IntArray(pixels.size)
 
-        // Collect foreground pixel indices and their luminance
         val fgIndices = mutableListOf<Int>()
         val fgLuminance = mutableListOf<Int>()
 
@@ -86,11 +83,8 @@ class MonochromeConverter {
 
         if (fgIndices.isEmpty()) return alphaMap
 
-        // K=2 split via Otsu's method: find the luminance threshold that
-        // best separates the foreground into two groups
         val threshold = otsuThreshold(fgLuminance)
 
-        // Compute mean luminance of each group to check if the split is meaningful
         var sumLow = 0L; var countLow = 0
         var sumHigh = 0L; var countHigh = 0
         for (lum in fgLuminance) {
@@ -102,14 +96,11 @@ class MonochromeConverter {
         val meanHigh = if (countHigh > 0) (sumHigh / countHigh).toInt() else 255
         val gap = meanHigh - meanLow
 
-        // If the two groups aren't visually distinct, just make everything solid
         if (gap < MIN_LUMINANCE_GAP || countLow == 0 || countHigh == 0) {
             for (idx in fgIndices) alphaMap[idx] = 255
             return alphaMap
         }
 
-        // Determine which group is "structure" (dominant/primary) vs "fill" (secondary).
-        // The larger group by pixel count is the primary; the smaller is the secondary detail.
         val primaryIsLow = countLow >= countHigh
 
         for (j in fgIndices.indices) {
@@ -117,21 +108,15 @@ class MonochromeConverter {
             val lum = fgLuminance[j]
             val isLowGroup = lum <= threshold
 
-            alphaMap[idx] = if (isLowGroup == primaryIsLow) {
-                255                 // primary structure → full opacity
-            } else {
-                SECONDARY_ALPHA     // secondary detail → subtle
-            }
+            // Respect original alpha for antialiased edges
+            val srcAlpha = Color.alpha(pixels[idx])
+            val baseAlpha = if (isLowGroup == primaryIsLow) 255 else SECONDARY_ALPHA
+            alphaMap[idx] = (baseAlpha * srcAlpha / 255).coerceIn(0, 255)
         }
 
         return alphaMap
     }
 
-    /**
-     * Otsu's method: finds the luminance threshold that minimizes
-     * intra-class variance, optimally splitting pixels into two groups.
-     * Much more robust than simple median for bimodal distributions.
-     */
     private fun otsuThreshold(luminances: List<Int>): Int {
         val histogram = IntArray(256)
         for (lum in luminances) histogram[lum.coerceIn(0, 255)]++

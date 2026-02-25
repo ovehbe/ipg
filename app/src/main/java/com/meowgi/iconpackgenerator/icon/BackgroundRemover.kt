@@ -16,11 +16,6 @@ import java.nio.FloatBuffer
  */
 class BackgroundRemover(context: Context) {
 
-    companion object {
-        private const val MODEL_FILE = "u2netp.onnx"
-        private const val MODEL_INPUT_SIZE = 320
-    }
-
     private val ortEnv = OrtEnvironment.getEnvironment()
     private val session: OrtSession
 
@@ -121,7 +116,9 @@ class BackgroundRemover(context: Context) {
 
     /**
      * Apply the 320x320 saliency mask to the original-size bitmap.
-     * Bilinear interpolation scales the mask to match input dimensions.
+     * Uses a low threshold to preserve as much icon content as possible.
+     * Anything U2-Net considers even slightly salient is kept fully;
+     * only regions it's very confident are background get removed.
      */
     private fun applyMask(original: Bitmap, mask: FloatArray, w: Int, h: Int): Bitmap {
         val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -133,7 +130,6 @@ class BackgroundRemover(context: Context) {
 
         for (y in 0 until h) {
             for (x in 0 until w) {
-                // Map output coords to mask coords (bilinear)
                 val mx = x.toFloat() * (ms - 1) / (w - 1).coerceAtLeast(1)
                 val my = y.toFloat() * (ms - 1) / (h - 1).coerceAtLeast(1)
 
@@ -153,8 +149,17 @@ class BackgroundRemover(context: Context) {
                 val srcPixel = srcPixels[y * w + x]
                 val srcAlpha = Color.alpha(srcPixel)
 
-                // Combine: mask confidence * original alpha
-                val finalAlpha = (v * srcAlpha).toInt().coerceIn(0, 255)
+                // Threshold approach: keep anything U2-Net rates above 0.15
+                // This preserves thin features and edges the model is uncertain about.
+                // Below 0.05 → definitely background.
+                // 0.05..0.15 → gentle fade for smooth edges.
+                val maskAlpha = when {
+                    v >= KEEP_THRESHOLD -> 1f
+                    v <= CUT_THRESHOLD -> 0f
+                    else -> (v - CUT_THRESHOLD) / (KEEP_THRESHOLD - CUT_THRESHOLD)
+                }
+
+                val finalAlpha = (maskAlpha * srcAlpha).toInt().coerceIn(0, 255)
 
                 outPixels[y * w + x] = Color.argb(
                     finalAlpha,
@@ -167,5 +172,15 @@ class BackgroundRemover(context: Context) {
 
         result.setPixels(outPixels, 0, w, 0, 0, w, h)
         return result
+    }
+
+    companion object {
+        private const val MODEL_FILE = "u2netp.onnx"
+        private const val MODEL_INPUT_SIZE = 320
+
+        // Saliency above this → fully kept (foreground)
+        private const val KEEP_THRESHOLD = 0.15f
+        // Saliency below this → fully removed (background)
+        private const val CUT_THRESHOLD = 0.05f
     }
 }

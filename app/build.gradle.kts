@@ -1,3 +1,5 @@
+import java.util.zip.ZipFile
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -50,6 +52,35 @@ android {
     androidResources {
         noCompress += "onnx"
     }
+}
+
+// Extract packviewer DEX into assets so generated icon packs have a real viewer Activity
+tasks.register("extractViewerDex") {
+    dependsOn(":packviewer:assembleRelease")
+    val packviewerApk = project(":packviewer").layout.buildDirectory
+        .file("outputs/apk/release/packviewer-release-unsigned.apk")
+    val outputDex = layout.projectDirectory.file("src/main/assets/viewer_classes.dex")
+
+    inputs.file(packviewerApk)
+    outputs.file(outputDex)
+
+    doLast {
+        val apkFile = packviewerApk.get().asFile
+        if (!apkFile.exists()) {
+            throw GradleException("Packviewer APK not found: $apkFile")
+        }
+        val zipFile = ZipFile(apkFile)
+        val dexEntry = zipFile.getEntry("classes.dex")
+            ?: throw GradleException("No classes.dex in packviewer APK")
+        val dexBytes = zipFile.getInputStream(dexEntry).readBytes()
+        outputDex.asFile.writeBytes(dexBytes)
+        zipFile.close()
+        println("Extracted viewer DEX: ${outputDex.asFile.length()} bytes")
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn("extractViewerDex")
 }
 
 dependencies {
