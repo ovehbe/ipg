@@ -31,6 +31,9 @@ class BackgroundRemover(context: Context) {
      * Returns a new Bitmap with the background removed (made transparent).
      * The input bitmap is not modified.
      */
+    var keepThreshold = KEEP_THRESHOLD
+    var cutThreshold = CUT_THRESHOLD
+
     fun removeBackground(input: Bitmap): Bitmap {
         val w = input.width
         val h = input.height
@@ -154,9 +157,9 @@ class BackgroundRemover(context: Context) {
                 // Below 0.05 → definitely background.
                 // 0.05..0.15 → gentle fade for smooth edges.
                 val maskAlpha = when {
-                    v >= KEEP_THRESHOLD -> 1f
-                    v <= CUT_THRESHOLD -> 0f
-                    else -> (v - CUT_THRESHOLD) / (KEEP_THRESHOLD - CUT_THRESHOLD)
+                    v >= keepThreshold -> 1f
+                    v <= cutThreshold -> 0f
+                    else -> (v - cutThreshold) / (keepThreshold - cutThreshold)
                 }
 
                 val finalAlpha = (maskAlpha * srcAlpha).toInt().coerceIn(0, 255)

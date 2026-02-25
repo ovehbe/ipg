@@ -16,6 +16,8 @@ class IconExtractor(private val context: Context) {
         const val ICON_SIZE = 192
     }
 
+    var useFullIcon = false
+
     fun extractIcon(appInfo: AppInfo): Bitmap {
         return try {
             val drawable = loadBestDrawable(appInfo)
@@ -53,7 +55,7 @@ class IconExtractor(private val context: Context) {
     }
 
     private fun renderToBitmap(drawable: Drawable): Bitmap {
-        if (drawable is AdaptiveIconDrawable) {
+        if (drawable is AdaptiveIconDrawable && !useFullIcon) {
             return renderAdaptiveIcon(drawable)
         }
 

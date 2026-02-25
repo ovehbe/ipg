@@ -20,22 +20,18 @@ class MonochromeConverter {
 
     companion object {
         const val OUTPUT_SIZE = 192
-        private const val PADDING_FRACTION = 0.16f
         private const val ALPHA_THRESHOLD = 25
-
-        // Opacity for the secondary (lighter) foreground region.
-        private const val SECONDARY_ALPHA = 80
-
-        // If the two luminance groups are closer than this, skip the split
-        // and render everything at full opacity (icon is essentially one color).
-        private const val MIN_LUMINANCE_GAP = 30
     }
+
+    var secondaryAlpha = 80
+    var minLuminanceGap = 30
+    var paddingFraction = 0.16f
 
     fun convert(source: Bitmap, targetColor: Int): Bitmap {
         val output = Bitmap.createBitmap(OUTPUT_SIZE, OUTPUT_SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(output)
 
-        val padding = (OUTPUT_SIZE * PADDING_FRACTION).toInt()
+        val padding = (OUTPUT_SIZE * paddingFraction).toInt()
         val innerSize = OUTPUT_SIZE - padding * 2
 
         val scaled = Bitmap.createScaledBitmap(source, innerSize, innerSize, true)
@@ -96,7 +92,7 @@ class MonochromeConverter {
         val meanHigh = if (countHigh > 0) (sumHigh / countHigh).toInt() else 255
         val gap = meanHigh - meanLow
 
-        if (gap < MIN_LUMINANCE_GAP || countLow == 0 || countHigh == 0) {
+        if (gap < minLuminanceGap || countLow == 0 || countHigh == 0) {
             for (idx in fgIndices) alphaMap[idx] = 255
             return alphaMap
         }
@@ -110,7 +106,7 @@ class MonochromeConverter {
 
             // Respect original alpha for antialiased edges
             val srcAlpha = Color.alpha(pixels[idx])
-            val baseAlpha = if (isLowGroup == primaryIsLow) 255 else SECONDARY_ALPHA
+            val baseAlpha = if (isLowGroup == primaryIsLow) 255 else secondaryAlpha
             alphaMap[idx] = (baseAlpha * srcAlpha / 255).coerceIn(0, 255)
         }
 

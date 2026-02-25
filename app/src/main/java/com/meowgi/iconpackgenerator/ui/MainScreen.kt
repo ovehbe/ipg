@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.InstallMobile
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -77,6 +78,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.meowgi.iconpackgenerator.domain.ConversionSettings
 import com.meowgi.iconpackgenerator.domain.GenerationProgress
 import com.meowgi.iconpackgenerator.domain.IconPackStyle
 import java.io.File
@@ -91,8 +93,15 @@ fun MainScreen(viewModel: GeneratorViewModel = viewModel()) {
     var showLogs by remember { mutableStateOf(false) }
     var showPermissionDialog by remember { mutableStateOf(false) }
     var showPreviewViewer by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    var convSettings by remember { mutableStateOf(ConversionSettings()) }
     val context = LocalContext.current
     val hasSelection = selectedStyle != null
+
+    // Load saved settings on first composition
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        convSettings = ConversionSettings.load(context)
+    }
 
     // Dry-run preview files
     val result = state.lastResult
@@ -150,7 +159,18 @@ fun MainScreen(viewModel: GeneratorViewModel = viewModel()) {
         topBar = {
             TopAppBar(
                 title = {
-                    Text("Icon Pack Generator", fontWeight = FontWeight.Bold)
+                    Text(
+                        if (showSettings) "Settings" else "Icon Pack Generator",
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                actions = {
+                    IconButton(onClick = { showSettings = !showSettings }) {
+                        Icon(
+                            if (showSettings) Icons.Default.Close else Icons.Default.Tune,
+                            contentDescription = if (showSettings) "Close" else "Settings"
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -159,6 +179,24 @@ fun MainScreen(viewModel: GeneratorViewModel = viewModel()) {
             )
         }
     ) { padding ->
+        if (showSettings) {
+            Column(modifier = Modifier.padding(padding)) {
+                SettingsScreen(
+                    settings = convSettings,
+                    onSave = { newSettings ->
+                        convSettings = newSettings
+                        ConversionSettings.save(context, newSettings)
+                        showSettings = false
+                    },
+                    onReset = {
+                        convSettings = ConversionSettings()
+                        ConversionSettings.save(context, convSettings)
+                    }
+                )
+            }
+            return@Scaffold
+        }
+
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()

@@ -7,6 +7,7 @@ import com.meowgi.iconpackgenerator.domain.AppInfo
 import com.meowgi.iconpackgenerator.domain.GenerationProgress
 import com.meowgi.iconpackgenerator.domain.GenerationProgress.Phase
 import com.meowgi.iconpackgenerator.domain.GenerationResult
+import com.meowgi.iconpackgenerator.domain.ConversionSettings
 import com.meowgi.iconpackgenerator.domain.IconPackConfig
 import com.meowgi.iconpackgenerator.icon.BackgroundRemover
 import com.meowgi.iconpackgenerator.icon.IconExtractor
@@ -50,10 +51,19 @@ class IconPackBuilder(private val context: Context) {
                 )
             }
 
+            // Load conversion settings
+            val settings = ConversionSettings.load(context)
+            extractor.useFullIcon = settings.useFullIcon
+            converter.secondaryAlpha = settings.secondaryAlpha
+            converter.minLuminanceGap = settings.minLuminanceGap
+            converter.paddingFraction = settings.iconPadding
+
             // Initialize U2-Net background remover
             onProgress(GenerationProgress(Phase.SCANNING, message = "Loading AI model..."))
             try {
                 bgRemover = BackgroundRemover(context)
+                bgRemover!!.keepThreshold = settings.bgKeepThreshold
+                bgRemover!!.cutThreshold = settings.bgCutThreshold
                 logs.add("U2-Net background remover loaded")
             } catch (e: Exception) {
                 logs.add("Warning: background remover unavailable (${e.message}), using fallback")
