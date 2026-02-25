@@ -46,6 +46,10 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    androidResources {
+        noCompress += "onnx"
+    }
 }
 
 dependencies {
@@ -54,6 +58,9 @@ dependencies {
 
     // APK signing (replaces apksigner + zipalign)
     implementation("com.android.tools.build:apksig:8.7.3")
+
+    // ONNX Runtime for U2-Net background removal
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.23.0")
 
     // Compose
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))

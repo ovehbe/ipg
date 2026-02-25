@@ -8,6 +8,7 @@ import com.meowgi.iconpackgenerator.domain.GenerationProgress
 import com.meowgi.iconpackgenerator.domain.GenerationProgress.Phase
 import com.meowgi.iconpackgenerator.domain.GenerationResult
 import com.meowgi.iconpackgenerator.domain.IconPackConfig
+import com.meowgi.iconpackgenerator.icon.BackgroundRemover
 import com.meowgi.iconpackgenerator.icon.IconExtractor
 import com.meowgi.iconpackgenerator.icon.MonochromeConverter
 import com.meowgi.iconpackgenerator.scanner.AppScanner
@@ -26,7 +27,7 @@ class IconPackBuilder(private val context: Context) {
     private val versionTracker = VersionTracker(context)
 
     companion object {
-        private const val MIN_FREE_BYTES = 50L * 1024 * 1024 // 50 MB
+        private const val MIN_FREE_BYTES = 50L * 1024 * 1024
         private const val BATCH_SIZE = 50
     }
 
@@ -36,9 +37,9 @@ class IconPackBuilder(private val context: Context) {
         isCancelled: () -> Boolean
     ): GenerationResult {
         val logs = mutableListOf<String>()
+        var bgRemover: BackgroundRemover? = null
 
         try {
-            // Check storage
             val stat = StatFs(context.cacheDir.absolutePath)
             val freeBytes = stat.availableBlocksLong * stat.blockSizeLong
             if (freeBytes < MIN_FREE_BYTES) {
@@ -48,7 +49,15 @@ class IconPackBuilder(private val context: Context) {
                 )
             }
 
-            // Phase: Scanning
+            // Initialize U2-Net background remover
+            onProgress(GenerationProgress(Phase.SCANNING, message = "Loading AI model..."))
+            try {
+                bgRemover = BackgroundRemover(context)
+                logs.add("U2-Net background remover loaded")
+            } catch (e: Exception) {
+                logs.add("Warning: background remover unavailable (${e.message}), using fallback")
+            }
+
             onProgress(GenerationProgress(Phase.SCANNING, message = "Scanning installed apps..."))
             val apps = scanner.scanInstalledApps()
             logs.add("Found ${apps.size} launcher apps")
@@ -61,14 +70,12 @@ class IconPackBuilder(private val context: Context) {
                 )
             }
 
-            // Prepare output directories
             val workDir = File(context.cacheDir, "ipg_work").apply {
                 deleteRecursively()
                 mkdirs()
             }
             val iconsDir = File(workDir, "icons").apply { mkdirs() }
 
-            // Phase: Extracting + Converting
             val iconEntries = mutableListOf<ApkAssembler.IconEntry>()
             val mappings = mutableListOf<Pair<AppInfo, String>>()
             var failedCount = 0
@@ -95,14 +102,23 @@ class IconPackBuilder(private val context: Context) {
 
                 try {
                     val rawBitmap = extractor.extractIcon(app)
-                    val monoBitmap = converter.convert(rawBitmap, config.color)
+
+                    // Pipeline: extract -> remove background (U2-Net) -> monochrome
+                    val cleanBitmap = if (bgRemover != null) {
+                        val result = bgRemover.removeBackground(rawBitmap)
+                        if (rawBitmap !== result) rawBitmap.recycle()
+                        result
+                    } else {
+                        rawBitmap
+                    }
+
+                    val monoBitmap = converter.convert(cleanBitmap, config.color)
 
                     val pngBytes = bitmapToPng(monoBitmap)
                     monoBitmap.recycle()
-                    if (rawBitmap !== monoBitmap) rawBitmap.recycle()
+                    if (cleanBitmap !== monoBitmap) cleanBitmap.recycle()
 
                     if (config.dryRun) {
-                        // Save to disk for preview
                         File(iconsDir, "$resourceName.png").writeBytes(pngBytes)
                     }
 
@@ -119,7 +135,6 @@ class IconPackBuilder(private val context: Context) {
                     logs.add("Failed to process ${app.packageName}: ${e.message}")
                 }
 
-                // Yield periodically to allow GC
                 if (index % BATCH_SIZE == 0) {
                     System.gc()
                 }
@@ -136,7 +151,6 @@ class IconPackBuilder(private val context: Context) {
                 )
             }
 
-            // Phase: Building APK
             onProgress(GenerationProgress(Phase.BUILDING_APK, message = "Building icon pack APK..."))
 
             val appFilterXml = AppFilterBuilder.buildXml(mappings)
@@ -154,7 +168,6 @@ class IconPackBuilder(private val context: Context) {
             assembler.assemble(assemblyConfig, iconEntries, appFilterXml, drawableXml, unsignedApk)
             logs.add("APK assembled: ${unsignedApk.length() / 1024}KB")
 
-            // Phase: Signing
             onProgress(GenerationProgress(Phase.SIGNING, message = "Signing APK..."))
 
             val apksDir = File(context.cacheDir, "generated_apks").apply { mkdirs() }
@@ -162,7 +175,6 @@ class IconPackBuilder(private val context: Context) {
             signer.sign(unsignedApk, signedApk)
             logs.add("APK signed: ${signedApk.length() / 1024}KB")
 
-            // Cleanup work dir
             unsignedApk.delete()
 
             onProgress(GenerationProgress(Phase.DONE, message = "Icon pack ready!"))
@@ -182,6 +194,8 @@ class IconPackBuilder(private val context: Context) {
                 errorMessage = e.message ?: "Unknown error",
                 logs = logs
             )
+        } finally {
+            bgRemover?.close()
         }
     }
 
