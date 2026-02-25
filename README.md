@@ -1,3 +1,7 @@
+<a href="https://github.com/ovehbe/ipg/releases/tag/v0.4.0">
+  <img src="https://img.shields.io/badge/Download-Pre--Release-red?style=for-the-badge" />
+</a>
+
 # Icon Pack Generator (IPG)
 
 An Android app that generates monochrome icon packs **on-device** by building, signing, and installing real icon-pack APKs that work with launchers like Nova, Lawnchair, ADW, and others.
